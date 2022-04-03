@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"github.com/matrixorigin/matrixone/pkg/compress"
 	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"io"
 	"os"
 )
 
@@ -25,7 +24,7 @@ type Segment struct {
 	lastInode   uint64
 	super       SuperBlock
 	nodes       map[string]*BlockFile
-	log         Log
+	log         *Log
 	GetPageSize func() int32
 
 	SyncMetadata func()
@@ -82,17 +81,16 @@ func (s *Segment) Mount() {
 	seq = 0
 	s.nodes = make(map[string]*BlockFile, 4096)
 	ino := Inode{inode: s.super.lognode.inode}
-	logFile := BlockFile{
+	logFile := &BlockFile{
 		snode: ino,
 		name:  "logfile",
+		segment: s,
 	}
-	logWriter := &FileWriter{
-		file:   logFile,
-		offset: LOG_START + logFile.snode.size,
-	}
-	s.log.writer = logWriter
+	s.log = &Log{}
+	s.log.logFile = logFile
+	s.log.offset = LOG_START + s.log.logFile.snode.size
 	s.log.seq = seq + 1
-	s.nodes[logFile.name] = &logFile
+	s.nodes[logFile.name] = s.log.logFile
 }
 
 func (s *Segment) NewBlockFile(fname string) *BlockFile {
@@ -108,6 +106,7 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 	file = &BlockFile{
 		snode: ino,
 		name:  fname,
+		segment: s,
 	}
 	s.nodes[file.name] = file
 	s.lastInode += 1
@@ -115,36 +114,5 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 }
 
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
-	var sbuffer bytes.Buffer
-	binary.Write(&sbuffer, binary.BigEndian, pl)
-	_, err := s.segFile.Seek(DATA_START, io.SeekStart)
-	if err != nil {
-		panic("seek is failed")
-	}
-	_, err = s.segFile.Write(sbuffer.Bytes())
-	if err != nil {
-		panic("write is failed")
-	}
-	cbufLen := (s.super.blockSize - (uint32(sbuffer.Len()) % s.super.blockSize)) + uint32(sbuffer.Len())
-	fd.snode.extents = append(fd.snode.extents, Extent{
-		offset: DATA_START,
-		length: cbufLen,
-	})
-	fd.snode.size += uint64(cbufLen)
-	var ibuffer bytes.Buffer
-	binary.Write(&ibuffer, binary.BigEndian, fd.snode.inode)
-	binary.Write(&ibuffer, binary.BigEndian, fd.snode.size)
-	for _, ext := range fd.snode.extents {
-		binary.Write(&ibuffer, binary.BigEndian, ext.offset)
-		binary.Write(&ibuffer, binary.BigEndian, ext.length)
-	}
-
-	ibufLen := (s.super.blockSize - (uint32(ibuffer.Len()) % s.super.blockSize)) + uint32(ibuffer.Len())
-
-	if ibufLen > uint32(sbuffer.Len()) {
-		zero := make([]byte, cbufLen-uint32(ibuffer.Len()))
-		binary.Write(&ibuffer, binary.BigEndian, zero)
-	}
-	s.segFile.Seek(int64(s.log.writer.offset), io.SeekStart)
-	s.segFile.Write(ibuffer.Bytes())
+	fd.Append(DATA_START, pl)
 }

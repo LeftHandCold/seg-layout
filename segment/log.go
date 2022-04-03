@@ -1,8 +1,9 @@
 package segment
 
 type Log struct {
-	writer *FileWriter
+	logFile *BlockFile
 	seq    uint64
+	offset uint64
 }
 
 func (ex Extent) Replay() {
