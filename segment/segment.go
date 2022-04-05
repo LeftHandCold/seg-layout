@@ -11,6 +11,7 @@ import (
 const SIZE = 2 * 1024 * 1024 * 1024
 const LOG_START = 2 * 4096
 const DATA_START = LOG_START + 1024*4096
+const DATA_SIZE = SIZE - DATA_START
 
 type SuperBlock struct {
 	version   uint64
@@ -25,9 +26,7 @@ type Segment struct {
 	super       SuperBlock
 	nodes       map[string]*BlockFile
 	log         *Log
-	GetPageSize func() int32
-
-	SyncMetadata func()
+	allocator 	*BitmapAllocator
 }
 
 func (s *Segment) Init() {
@@ -91,6 +90,11 @@ func (s *Segment) Mount() {
 	s.log.offset = LOG_START + s.log.logFile.snode.size
 	s.log.seq = seq + 1
 	s.nodes[logFile.name] = s.log.logFile
+	s.allocator = &BitmapAllocator{
+		pageSize: s.GetPageSize(),
+	}
+
+	s.allocator.Init(DATA_SIZE, s.GetPageSize())
 }
 
 func (s *Segment) NewBlockFile(fname string) *BlockFile {
@@ -115,4 +119,9 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
 	fd.Append(DATA_START, pl)
+}
+
+
+func (s *Segment) GetPageSize () uint32 {
+	return s.super.blockSize
 }

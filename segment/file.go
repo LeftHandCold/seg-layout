@@ -15,7 +15,7 @@ type BlockFile struct {
 func (b *BlockFile) Append (offset uint64, data []byte)  {
 	var sbuffer bytes.Buffer
 	binary.Write(&sbuffer, binary.BigEndian, data)
-	_, err := b.segment.segFile.Seek(DATA_START, io.SeekStart)
+	_, err := b.segment.segFile.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		panic("seek is failed")
 	}
@@ -46,5 +46,5 @@ func (b *BlockFile) Append (offset uint64, data []byte)  {
 	}
 	b.segment.segFile.Seek(int64(b.segment.log.offset), io.SeekStart)
 	b.segment.segFile.Write(ibuffer.Bytes())
-	
+	b.segment.log.offset += uint64(ibuffer.Len())
 }
