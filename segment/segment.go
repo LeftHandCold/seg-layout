@@ -118,7 +118,8 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 }
 
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
-	fd.Append(DATA_START, pl)
+	offset, _ := s.allocator.Allocate(uint64(len(pl)), &fd.snode)
+	fd.Append(DATA_START + offset, pl)
 }
 
 
