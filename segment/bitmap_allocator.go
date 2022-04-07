@@ -87,8 +87,8 @@ func (b *BitmapAllocator) Allocate (len uint64, inode *Inode) (uint64, uint64){
 		}
 		toAlloc := length - allocated
 		allocated += toAlloc
-		l0start := pos * BITS_PER_UNIT
-		l0end	:= pos * BITS_PER_UNIT + length / uint64(b.pageSize)
+		l0start := pos
+		l0end	:= pos + length / uint64(b.pageSize)
 		b.markAllocL0(l0start, l0end)
 		l0start = p2align(l0start, BITS_PER_UNITSET)
 		l0end = p2roundup(l0end, BITS_PER_UNITSET)
