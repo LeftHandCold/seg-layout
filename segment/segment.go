@@ -21,12 +21,12 @@ type SuperBlock struct {
 }
 
 type Segment struct {
-	segFile     *os.File
-	lastInode   uint64
-	super       SuperBlock
-	nodes       map[string]*BlockFile
-	log         *Log
-	allocator 	*BitmapAllocator
+	segFile   *os.File
+	lastInode uint64
+	super     SuperBlock
+	nodes     map[string]*BlockFile
+	log       *Log
+	allocator *BitmapAllocator
 }
 
 func (s *Segment) Init() {
@@ -81,8 +81,8 @@ func (s *Segment) Mount() {
 	s.nodes = make(map[string]*BlockFile, 4096)
 	ino := Inode{inode: s.super.lognode.inode}
 	logFile := &BlockFile{
-		snode: ino,
-		name:  "logfile",
+		snode:   ino,
+		name:    "logfile",
 		segment: s,
 	}
 	s.log = &Log{}
@@ -108,8 +108,8 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 		}
 	}
 	file = &BlockFile{
-		snode: ino,
-		name:  fname,
+		snode:   ino,
+		name:    fname,
 		segment: s,
 	}
 	s.nodes[file.name] = file
@@ -119,10 +119,9 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
 	offset, _ := s.allocator.Allocate(uint64(len(pl)), &fd.snode)
-	fd.Append(DATA_START + offset, pl)
+	fd.Append(DATA_START+offset, pl)
 }
 
-
-func (s *Segment) GetPageSize () uint32 {
+func (s *Segment) GetPageSize() uint32 {
 	return s.super.blockSize
 }

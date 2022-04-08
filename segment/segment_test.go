@@ -1,12 +1,16 @@
 package segment
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestSegment_Init(t *testing.T) {
 	seg := Segment{}
 	seg.Init()
 	seg.Mount()
 	file := seg.NewBlockFile("test")
-	seg.Append(file, []byte("this is tests"))
-	seg.Append(file, []byte("this is test2"))
+	for i := 0; i < 512; i++ {
+		seg.Append(file, []byte(fmt.Sprintf("this is tests %d", i)))
+	}
 }

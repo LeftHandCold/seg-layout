@@ -91,43 +91,63 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	var allocated uint64 = 0
 	l1pos := b.lastPos / uint64(b.pageSize) / BITS_PER_UNITSET / BITS_PER_UNIT
 	l1end := cap(b.level1)
-	pos := b.lastPos / uint64(b.pageSize)
+	//pos := b.lastPos / uint64(b.pageSize)
 	for ; length > allocated && l1pos < uint64(l1end); l1pos++ {
 		l1bit := b.level1[l1pos]
 		if l1bit == ALL_UNIT_CLEAR {
 			b.lastPos += BITS_PER_UNITSET * uint64(b.pageSize)
 			continue
-		} else if l1bit == ALL_UNIT_SET {
+		} /*else if l1bit == ALL_UNIT_SET {
 			toAlloc := length - allocated
 			allocated += toAlloc
 			l0start := pos
 			l0end := pos + length/uint64(b.pageSize)
 			b.markAllocL0(l0start, l0end)
-			l0start = p2align(l0start, BITS_PER_UNITSET)
+			/*l0start = p2align(l0start, BITS_PER_UNITSET)
 			l0end = p2roundup(l0end, BITS_PER_UNITSET)
 			b.markAllocL1(l0start, l0end)
 			break
 		}
-		toAlloc := length - allocated
-		allocated += toAlloc
-		l0start := pos
-		l0end := pos + length/uint64(b.pageSize)
-		b.markAllocL0(l0start, l0end)
-		l0start = p2align(l0start, BITS_PER_UNITSET)
-		l0end = p2roundup(l0end, BITS_PER_UNITSET)
-		b.markAllocL1(l0start, l0end)
+		logutil.Infof("fsdfsf")*/
 		// get level1 free start bit
-		/*freePos := b.getBitPos(l1bit, 0)
-		l0pos := freePos * BITS_PER_UNITSET
-		l0end := (freePos + 1) * BITS_PER_UNITSET
-		for idx := l0pos / BITS_PER_UNIT; idx < l0end/BITS_PER_UNIT && length > allocated; idx++ {
+		l1freePos := b.getBitPos(l1bit, 0)
+		l0pos := l1freePos * BITS_PER_UNITSET
+		l0end := (l1freePos + 1) * BITS_PER_UNITSET
+		needPage := (length - allocated) / uint64(b.pageSize)
+		for idx := l0pos / BITS_PER_UNIT; idx < l0end/BITS_PER_UNIT &&
+			length > allocated; idx++ {
 			val := &(b.level0[idx])
 			if *val == ALL_UNIT_CLEAR {
 				continue
-			} else if  {
+			} else if *val == ALL_UNIT_SET {
 
 			}
-		}*/
+
+			l0freePos := b.getBitPos(*val, 0)
+			//nextPos := l0freePos + 1
+
+			/*for {
+				if nextPos < BITS_PER_UNIT &&
+					(nextPos-l0freePos) < uint32(needPage) {
+					if (*val & (1 << nextPos)) == 0 {
+						break
+					} else {
+						nextPos++
+					}
+				}
+			}*/
+
+			allocated += needPage * uint64(b.pageSize)
+			l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
+			l0end := l0start + needPage
+			b.markAllocL0(l0start, l0end)
+			if idx == 7 && *val == ALL_UNIT_CLEAR {
+				l0start = p2align(l0start, BITS_PER_UNITSET)
+				l0end = p2roundup(l0end, BITS_PER_UNITSET)
+				b.markAllocL1(l0start, l0end)
+				break
+			}
+		}
 	}
 	offset := b.lastPos
 	b.lastPos += allocated

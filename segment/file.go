@@ -3,17 +3,16 @@ package segment
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"io"
 )
 
 type BlockFile struct {
-	snode Inode
-	name  string
+	snode   Inode
+	name    string
 	segment *Segment
 }
 
-func (b *BlockFile) Append (offset uint64, data []byte)  {
+func (b *BlockFile) Append(offset uint64, data []byte) {
 	var sbuffer bytes.Buffer
 	binary.Write(&sbuffer, binary.BigEndian, data)
 	_, err := b.segment.segFile.Seek(int64(offset), io.SeekStart)
@@ -35,7 +34,6 @@ func (b *BlockFile) Append (offset uint64, data []byte)  {
 	binary.Write(&ibuffer, binary.BigEndian, b.snode.size)
 	binary.Write(&ibuffer, binary.BigEndian, uint64(len(b.snode.extents)))
 	for _, ext := range b.snode.extents {
-		logutil.Infof("ext.offset is %d", ext.offset)
 		binary.Write(&ibuffer, binary.BigEndian, ext.offset)
 		binary.Write(&ibuffer, binary.BigEndian, ext.length)
 	}
