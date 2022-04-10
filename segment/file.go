@@ -39,9 +39,8 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 	}
 
 	ibufLen := (b.segment.super.blockSize - (uint32(ibuffer.Len()) % b.segment.super.blockSize)) + uint32(ibuffer.Len())
-
 	if ibufLen > uint32(sbuffer.Len()) {
-		zero := make([]byte, cbufLen-uint32(ibuffer.Len()))
+		zero := make([]byte, ibufLen-uint32(ibuffer.Len()))
 		binary.Write(&ibuffer, binary.BigEndian, zero)
 	}
 	b.segment.segFile.Seek(int64(b.segment.log.offset), io.SeekStart)
