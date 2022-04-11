@@ -122,6 +122,14 @@ func (s *Segment) Append(fd *BlockFile, pl []byte) {
 	fd.Append(DATA_START+offset, pl)
 }
 
+func (s *Segment) Free(fd *BlockFile, n uint32) {
+	for i, ext := range fd.snode.extents {
+		if i == int(n-1) {
+			s.allocator.Free(ext.offset-DATA_START, ext.length)
+		}
+	}
+}
+
 func (s *Segment) GetPageSize() uint32 {
 	return s.super.blockSize
 }

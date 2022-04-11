@@ -73,6 +73,34 @@ func (b *BitmapAllocator) markAllocL1(start, length uint64) {
 	}
 }
 
+func (b *BitmapAllocator) markFree0(start, length uint64) {
+	pos := start
+	var bit uint64 = 1 << (start % BITS_PER_UNIT)
+	val := &(b.level0[pos/BITS_PER_UNIT])
+	for {
+		if pos == length {
+			break
+		}
+		*val |= bit
+		bit <<= 0
+		pos++
+	}
+}
+
+func (b *BitmapAllocator) markFree1(start, length uint64) {
+	pos := start / BITS_PER_UNIT
+	//end := length / BITS_PER_UNIT
+	l1pos := start / BITS_PER_UNITSET
+	pos++
+	pos = p2roundup(pos, UNITS_PER_UNITSET)
+
+	if (pos % UNITS_PER_UNITSET) == 0 {
+		val := &(b.level1[l1pos/BITS_PER_UNIT])
+		var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
+		*val &= ^bit
+	}
+}
+
 func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 	var mask uint64 = 1 << start
 	for {
@@ -84,6 +112,14 @@ func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 		break
 	}
 	return start
+}
+
+func (b *BitmapAllocator) Free(start uint32, len uint32) {
+	pos := start / b.pageSize
+	end := pos + len/b.pageSize
+	b.markFree0(uint64(pos), uint64(end))
+	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
+		b.level1[0], b.level0[0], start, len)
 }
 
 func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
