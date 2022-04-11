@@ -1,10 +1,10 @@
 package segment
 
 type Extent struct {
-	offset uint64
+	offset uint32
 	length uint32
 }
 
-func (ex Extent) End() uint64 {
-	return ex.offset + uint64(ex.length)
+func (ex Extent) End() uint32 {
+	return ex.offset + ex.length
 }

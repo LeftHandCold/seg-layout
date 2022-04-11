@@ -154,7 +154,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
 		b.level1[0], b.level0[0], offset, allocated)
 	inode.extents = append(inode.extents, Extent{
-		offset: offset + DATA_START,
+		offset: uint32(offset) + DATA_START,
 		length: uint32(allocated),
 	})
 	return offset, allocated
