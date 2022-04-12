@@ -59,20 +59,6 @@ func (b *BitmapAllocator) markAllocL0(start, length uint64) {
 	}
 }
 
-func (b *BitmapAllocator) markAllocL1(start, length uint64) {
-	pos := start / BITS_PER_UNIT
-	//end := length / BITS_PER_UNIT
-	l1pos := start / BITS_PER_UNITSET
-	pos++
-	pos = p2roundup(pos, UNITS_PER_UNITSET)
-
-	if (pos % UNITS_PER_UNITSET) == 0 {
-		val := &(b.level1[l1pos/BITS_PER_UNIT])
-		var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
-		*val &= ^bit
-	}
-}
-
 func (b *BitmapAllocator) markFree0(start, length uint64) {
 	pos := start
 	var bit uint64 = 1 << (start % BITS_PER_UNIT)
@@ -84,6 +70,40 @@ func (b *BitmapAllocator) markFree0(start, length uint64) {
 		*val |= bit
 		bit <<= 0
 		pos++
+	}
+}
+
+func (b *BitmapAllocator) markLevel1(start, length uint64, free bool) {
+	if start%UNITSET_BYTES != 0 {
+		panic("start align error")
+	} else if length%UNITSET_BYTES != 0 {
+		panic("length align error")
+	}
+	clear := true
+	for idx := start / BITS_PER_UNIT; idx < length/BITS_PER_UNIT; idx++ {
+		val := &(b.level0[idx])
+		if *val != ALL_UNIT_CLEAR {
+			clear = false
+		}
+	}
+	pos := start / BITS_PER_UNIT
+	//end := length / BITS_PER_UNIT
+	l1pos := start / BITS_PER_UNITSET
+	pos++
+	pos = p2roundup(pos, UNITS_PER_UNITSET)
+	if !free && clear {
+
+		if (pos % UNITS_PER_UNITSET) == 0 {
+			l1val := &(b.level1[l1pos/BITS_PER_UNIT])
+			var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
+			*l1val &= ^bit
+		}
+	} else if free && !clear {
+		if (pos % UNITS_PER_UNITSET) == 0 {
+			l1val := &(b.level1[l1pos/BITS_PER_UNIT])
+			var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
+			*l1val |= bit
+		}
 	}
 }
 
@@ -118,6 +138,9 @@ func (b *BitmapAllocator) Free(start uint32, len uint32) {
 	pos := start / b.pageSize
 	end := pos + len/b.pageSize
 	b.markFree0(uint64(pos), uint64(end))
+	l0start := p2align(uint64(pos), BITS_PER_UNITSET)
+	l0end := p2roundup(uint64(end), BITS_PER_UNITSET)
+	b.markLevel1(l0start, l0end, true)
 	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
 		b.level1[0], b.level0[0], start, len)
 }
@@ -133,18 +156,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 		if l1bit == ALL_UNIT_CLEAR {
 			b.lastPos += BITS_PER_UNITSET * uint64(b.pageSize)
 			continue
-		} /*else if l1bit == ALL_UNIT_SET {
-			toAlloc := length - allocated
-			allocated += toAlloc
-			l0start := pos
-			l0end := pos + length/uint64(b.pageSize)
-			b.markAllocL0(l0start, l0end)
-			/*l0start = p2align(l0start, BITS_PER_UNITSET)
-			l0end = p2roundup(l0end, BITS_PER_UNITSET)
-			b.markAllocL1(l0start, l0end)
-			break
 		}
-		logutil.Infof("fsdfsf")*/
 		// get level1 free start bit
 		l1freePos := b.getBitPos(l1bit, 0)
 		l0pos := l1freePos * BITS_PER_UNITSET
@@ -177,12 +189,9 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 			l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
 			l0end := l0start + needPage
 			b.markAllocL0(l0start, l0end)
-			if idx == 7 && *val == ALL_UNIT_CLEAR {
-				l0start = p2align(l0start, BITS_PER_UNITSET)
-				l0end = p2roundup(l0end, BITS_PER_UNITSET)
-				b.markAllocL1(l0start, l0end)
-				break
-			}
+			l0start = p2align(l0start, BITS_PER_UNITSET)
+			l0end = p2roundup(l0end, BITS_PER_UNITSET)
+			b.markLevel1(l0start, l0end, false)
 		}
 	}
 	offset := b.lastPos
