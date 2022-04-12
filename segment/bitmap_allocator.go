@@ -143,6 +143,7 @@ func (b *BitmapAllocator) Free(start uint32, len uint32) {
 	b.markLevel1(l0start, l0end, true)
 	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
 		b.level1[0], b.level0[0], start, len)
+	b.lastPos = uint64(start)
 }
 
 func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
@@ -187,6 +188,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 
 			allocated += needPage * uint64(b.pageSize)
 			l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
+			b.lastPos = l0start * 4096
 			l0end := l0start + needPage
 			b.markAllocL0(l0start, l0end)
 			l0start = p2align(l0start, BITS_PER_UNITSET)
@@ -196,8 +198,8 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	}
 	offset := b.lastPos
 	b.lastPos += allocated
-	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
-		b.level1[0], b.level0[0], offset, allocated)
+	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d, level08 is %x",
+		b.level1[0], b.level0[0], offset, allocated, b.level0[8])
 	inode.extents = append(inode.extents, Extent{
 		offset: uint32(offset) + DATA_START,
 		length: uint32(allocated),
