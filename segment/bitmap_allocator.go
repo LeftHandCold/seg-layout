@@ -45,7 +45,7 @@ func (b *BitmapAllocator) Init(capacity uint64, pageSize uint32) {
 	b.lastPos = 0
 }
 
-func (b *BitmapAllocator) markAllocL0(start, length uint64) {
+func (b *BitmapAllocator) markAllocFree0(start, length uint64, free bool) {
 	pos := start
 	var bit uint64 = 1 << (start % BITS_PER_UNIT)
 	bitpos := pos / BITS_PER_UNIT
@@ -55,10 +55,14 @@ func (b *BitmapAllocator) markAllocL0(start, length uint64) {
 		end = p2roundup(pos+1, BITS_PER_UNIT)
 	}
 	for {
-		if pos == end {
+		if pos >= end {
 			break
 		}
-		*val &= ^bit
+		if free {
+			*val |= bit
+		} else {
+			*val &= ^bit
+		}
 		bit <<= 1
 		pos++
 	}
@@ -68,12 +72,16 @@ func (b *BitmapAllocator) markAllocL0(start, length uint64) {
 		end = p2align(length, BITS_PER_UNIT)
 	}
 	for {
-		if pos == end {
+		if pos >= end {
 			break
 		}
 		bitpos++
 		val = &(b.level0[bitpos])
-		*val = ALL_UNIT_CLEAR
+		if free {
+			*val = ALL_UNIT_SET
+		} else {
+			*val = ALL_UNIT_CLEAR
+		}
 		pos += BITS_PER_UNIT
 	}
 
@@ -81,25 +89,15 @@ func (b *BitmapAllocator) markAllocL0(start, length uint64) {
 	bitpos++
 	val = &(b.level0[bitpos])
 	for {
-		if pos == length {
+		if pos >= length {
 			break
 		}
-		*val &= ^bit
+		if free {
+			*val |= bit
+		} else {
+			*val &= ^bit
+		}
 		bit <<= 1
-		pos++
-	}
-}
-
-func (b *BitmapAllocator) markFree0(start, length uint64) {
-	pos := start
-	var bit uint64 = 1 << (start % BITS_PER_UNIT)
-	val := &(b.level0[pos/BITS_PER_UNIT])
-	for {
-		if pos == length {
-			break
-		}
-		*val |= bit
-		bit <<= 0
 		pos++
 	}
 }
@@ -138,20 +136,6 @@ func (b *BitmapAllocator) markLevel1(start, length uint64, free bool) {
 	}
 }
 
-func (b *BitmapAllocator) markFree1(start, length uint64) {
-	pos := start / BITS_PER_UNIT
-	//end := length / BITS_PER_UNIT
-	l1pos := start / BITS_PER_UNITSET
-	pos++
-	pos = p2roundup(pos, UNITS_PER_UNITSET)
-
-	if (pos % UNITS_PER_UNITSET) == 0 {
-		val := &(b.level1[l1pos/BITS_PER_UNIT])
-		var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
-		*val &= ^bit
-	}
-}
-
 func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 	var mask uint64 = 1 << start
 	for {
@@ -168,7 +152,7 @@ func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 func (b *BitmapAllocator) Free(start uint32, len uint32) {
 	pos := start / b.pageSize
 	end := pos + len/b.pageSize
-	b.markFree0(uint64(pos), uint64(end))
+	b.markAllocFree0(uint64(pos), uint64(end), true)
 	l0start := p2align(uint64(pos), BITS_PER_UNITSET)
 	l0end := p2roundup(uint64(end), BITS_PER_UNITSET)
 	b.markLevel1(l0start, l0end, true)
@@ -221,7 +205,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 			l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
 			b.lastPos = l0start * uint64(b.pageSize)
 			l0end := l0start + needPage
-			b.markAllocL0(l0start, l0end)
+			b.markAllocFree0(l0start, l0end, false)
 			l0start = p2align(l0start, BITS_PER_UNITSET)
 			l0end = p2roundup(l0end, BITS_PER_UNITSET)
 			b.markLevel1(l0start, l0end, false)

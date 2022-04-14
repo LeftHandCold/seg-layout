@@ -21,13 +21,14 @@ func TestSegment_Init(t *testing.T) {
 		binary.Write(&sbuffer, binary.BigEndian, zero)
 	}
 	seg.Append(file, sbuffer.Bytes())
-	/*for i := 0; i < 512; i++ {
+	for i := 0; i < 256; i++ {
 		seg.Append(file, []byte(fmt.Sprintf("this is tests %d", i)))
 	}
 
-	seg.Free(file, 3)
+	seg.Free(file, 1)
 	seg.Free(file, 40)
-	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 512)))
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 513)))
-	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 514)))*/
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 514)))
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 515)))
+
 }
