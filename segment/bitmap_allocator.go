@@ -48,7 +48,38 @@ func (b *BitmapAllocator) Init(capacity uint64, pageSize uint32) {
 func (b *BitmapAllocator) markAllocL0(start, length uint64) {
 	pos := start
 	var bit uint64 = 1 << (start % BITS_PER_UNIT)
-	val := &(b.level0[pos/BITS_PER_UNIT])
+	bitpos := pos / BITS_PER_UNIT
+	val := &(b.level0[bitpos])
+	end := length
+	if end > p2roundup(pos+1, BITS_PER_UNIT) {
+		end = p2roundup(pos+1, BITS_PER_UNIT)
+	}
+	for {
+		if pos == end {
+			break
+		}
+		*val &= ^bit
+		bit <<= 1
+		pos++
+	}
+
+	end = length
+	if end > p2align(length, BITS_PER_UNIT) {
+		end = p2align(length, BITS_PER_UNIT)
+	}
+	for {
+		if pos == end {
+			break
+		}
+		bitpos++
+		val = &(b.level0[bitpos])
+		*val = ALL_UNIT_CLEAR
+		pos += BITS_PER_UNIT
+	}
+
+	bit = 1
+	bitpos++
+	val = &(b.level0[bitpos])
 	for {
 		if pos == length {
 			break
@@ -188,7 +219,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 
 			allocated += needPage * uint64(b.pageSize)
 			l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
-			b.lastPos = l0start * 4096
+			b.lastPos = l0start * uint64(b.pageSize)
 			l0end := l0start + needPage
 			b.markAllocL0(l0start, l0end)
 			l0start = p2align(l0start, BITS_PER_UNITSET)
@@ -199,7 +230,7 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	offset := b.lastPos
 	b.lastPos += allocated
 	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d, level08 is %x",
-		b.level1[0], b.level0[0], offset, allocated, b.level0[8])
+		b.level1[0], b.level0[4], offset, allocated, b.level0[8])
 	inode.extents = append(inode.extents, Extent{
 		offset: uint32(offset) + DATA_START,
 		length: uint32(allocated),
