@@ -37,6 +37,9 @@ func (b *BitmapAllocator) Init(capacity uint64, pageSize uint32) {
 	}
 
 	l1UnitCount := capacity / uint64(l1granularity) / BITS_PER_UNIT
+	if l1UnitCount == 0 {
+		l1UnitCount = 1
+	}
 	b.level1 = make([]uint64, l1UnitCount)
 	for i, _ := range b.level1 {
 		b.level1[i] = ALL_UNIT_SET
@@ -213,8 +216,6 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	}
 	offset := b.lastPos
 	b.lastPos += allocated
-	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d, level08 is %x",
-		b.level1[0], b.level0[4], offset, allocated, b.level0[8])
 	inode.extents = append(inode.extents, Extent{
 		offset: uint32(offset) + DATA_START,
 		length: uint32(allocated),

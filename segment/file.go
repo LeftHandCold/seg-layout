@@ -29,7 +29,7 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 		length: cbufLen,
 	})*/
 	b.snode.size += uint64(cbufLen)
-	var ibuffer bytes.Buffer
+	/*var ibuffer bytes.Buffer
 	binary.Write(&ibuffer, binary.BigEndian, b.snode.inode)
 	binary.Write(&ibuffer, binary.BigEndian, b.snode.size)
 	binary.Write(&ibuffer, binary.BigEndian, uint64(len(b.snode.extents)))
@@ -45,5 +45,5 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 	}
 	b.segment.segFile.Seek(int64(b.segment.log.offset), io.SeekStart)
 	b.segment.segFile.Write(ibuffer.Bytes())
-	b.segment.log.offset += uint64(ibuffer.Len())
+	b.segment.log.offset += uint64(ibuffer.Len())*/
 }

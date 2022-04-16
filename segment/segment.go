@@ -12,6 +12,7 @@ const SIZE = 2 * 1024 * 1024 * 1024
 const LOG_START = 2 * 4096
 const DATA_START = LOG_START + 1024*4096
 const DATA_SIZE = SIZE - DATA_START
+const LOG_SIZE = DATA_START - LOG_START
 
 type SuperBlock struct {
 	version   uint64
@@ -93,8 +94,12 @@ func (s *Segment) Mount() {
 	s.allocator = &BitmapAllocator{
 		pageSize: s.GetPageSize(),
 	}
+	s.log.allocator = &BitmapAllocator{
+		pageSize: s.GetPageSize(),
+	}
 
 	s.allocator.Init(DATA_SIZE, s.GetPageSize())
+	s.log.allocator.Init(LOG_SIZE, s.GetPageSize())
 }
 
 func (s *Segment) NewBlockFile(fname string) *BlockFile {
@@ -102,9 +107,10 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 	var ino Inode
 	if file == nil {
 		ino = Inode{
-			inode:   s.lastInode + 1,
-			size:    0,
-			extents: make([]Extent, 0),
+			inode:      s.lastInode + 1,
+			size:       0,
+			extents:    make([]Extent, 0),
+			logExtents: Extent{},
 		}
 	}
 	file = &BlockFile{
@@ -120,6 +126,7 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
 	offset, _ := s.allocator.Allocate(uint64(len(pl)), &fd.snode)
 	fd.Append(DATA_START+offset, pl)
+	s.log.Append(fd)
 }
 
 func (s *Segment) Free(fd *BlockFile, n uint32) {
