@@ -1,8 +1,6 @@
 package segment
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"testing"
 )
@@ -12,7 +10,13 @@ func TestSegment_Init(t *testing.T) {
 	seg.Init()
 	seg.Mount()
 	file := seg.NewBlockFile("test")
-	var sbuffer bytes.Buffer
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 513)))
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 514)))
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 515)))
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
+	seg.Update(file, []byte(fmt.Sprintf("this is tests %d", 517)), 0)
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 518)))
+	/*var sbuffer bytes.Buffer
 	binary.Write(&sbuffer, binary.BigEndian, []byte(fmt.Sprintf("this is tests %d", 515)))
 	var size uint32 = 1024*1024 + 4096
 	ibufLen := (size - (uint32(sbuffer.Len()) % size)) + uint32(sbuffer.Len())
@@ -29,6 +33,6 @@ func TestSegment_Init(t *testing.T) {
 	seg.Free(file, 40)
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 513)))
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 514)))
-	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 515)))
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 515)))*/
 
 }

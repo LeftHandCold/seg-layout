@@ -1,7 +1,5 @@
 package segment
 
-import "github.com/matrixorigin/matrixone/pkg/logutil"
-
 const UNIT_BYTES = 8 // Length of uint64 bytes
 const UNITS_PER_UNITSET = 8
 const UNITSET_BYTES = UNIT_BYTES * UNITS_PER_UNITSET
@@ -159,12 +157,10 @@ func (b *BitmapAllocator) Free(start uint32, len uint32) {
 	l0start := p2align(uint64(pos), BITS_PER_UNITSET)
 	l0end := p2roundup(uint64(end), BITS_PER_UNITSET)
 	b.markLevel1(l0start, l0end, true)
-	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
-		b.level1[0], b.level0[0], start, len)
 	b.lastPos = uint64(start)
 }
 
-func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
+func (b *BitmapAllocator) Allocate(len uint64) (uint64, uint64) {
 	length := p2roundup(len, uint64(b.pageSize))
 	var allocated uint64 = 0
 	l1pos := b.lastPos / uint64(b.pageSize) / BITS_PER_UNITSET / BITS_PER_UNIT
@@ -216,9 +212,5 @@ func (b *BitmapAllocator) Allocate(len uint64, inode *Inode) (uint64, uint64) {
 	}
 	offset := b.lastPos
 	b.lastPos += allocated
-	inode.extents = append(inode.extents, Extent{
-		offset: uint32(offset) + DATA_START,
-		length: uint32(allocated),
-	})
 	return offset, allocated
 }

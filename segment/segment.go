@@ -124,9 +124,22 @@ func (s *Segment) NewBlockFile(fname string) *BlockFile {
 }
 
 func (s *Segment) Append(fd *BlockFile, pl []byte) {
-	offset, _ := s.allocator.Allocate(uint64(len(pl)), &fd.snode)
+	offset, allocated := s.allocator.Allocate(uint64(len(pl)))
+	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
+		s.allocator.level1[0], s.allocator.level0[0], offset, allocated)
 	fd.Append(DATA_START+offset, pl)
 	s.log.Append(fd)
+}
+
+func (s *Segment) Update(fd *BlockFile, pl []byte, fOffset uint64) {
+	pOffset := uint32(fOffset) / s.GetPageSize()
+	offset, allocated := s.allocator.Allocate(uint64(len(pl)))
+	old := fd.Update(DATA_START+offset, pl, pOffset)
+	s.allocator.Free(old-DATA_START, uint32(allocated))
+	logutil.Infof("updagte level1 is %x, level0 is %x, offset is %d, allocated is %d",
+		s.allocator.level1[0], s.allocator.level0[0], s.allocator.lastPos, allocated)
+	s.log.Append(fd)
+
 }
 
 func (s *Segment) Free(fd *BlockFile, n uint32) {
