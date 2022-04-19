@@ -37,23 +37,6 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 	})
 	logutil.Infof("extents is %d", len(b.snode.extents))
 	b.snode.size += uint64(cbufLen)
-	/*var ibuffer bytes.Buffer
-	binary.Write(&ibuffer, binary.BigEndian, b.snode.inode)
-	binary.Write(&ibuffer, binary.BigEndian, b.snode.size)
-	binary.Write(&ibuffer, binary.BigEndian, uint64(len(b.snode.extents)))
-	for _, ext := range b.snode.extents {
-		binary.Write(&ibuffer, binary.BigEndian, ext.offset)
-		binary.Write(&ibuffer, binary.BigEndian, ext.length)
-	}
-
-	ibufLen := (b.segment.super.blockSize - (uint32(ibuffer.Len()) % b.segment.super.blockSize)) + uint32(ibuffer.Len())
-	if ibufLen > uint32(sbuffer.Len()) {
-		zero := make([]byte, ibufLen-uint32(ibuffer.Len()))
-		binary.Write(&ibuffer, binary.BigEndian, zero)
-	}
-	b.segment.segFile.Seek(int64(b.segment.log.offset), io.SeekStart)
-	b.segment.segFile.Write(ibuffer.Bytes())
-	b.segment.log.offset += uint64(ibuffer.Len())*/
 }
 
 func (b *BlockFile) Update(offset uint64, data []byte, pageOffset uint32) uint32 {
