@@ -163,9 +163,6 @@ func (b *BitmapAllocator) Free(start uint32, len uint32) {
 func (b *BitmapAllocator) Allocate(len uint64) (uint64, uint64) {
 	length := p2roundup(len, uint64(b.pageSize))
 	var allocated uint64 = 0
-	if b.lastPos == 17522688 {
-		print("fsdfsdf")
-	}
 	l1pos := b.lastPos / uint64(b.pageSize) / BITS_PER_UNITSET / BITS_PER_UNIT
 	l1end := cap(b.level1)
 	var needPage, allocatedPage, l0freePos, nextPos uint32
@@ -185,14 +182,9 @@ func (b *BitmapAllocator) Allocate(len uint64) (uint64, uint64) {
 			l0end := (l1freePos+1)*BITS_PER_UNITSET + uint32(l1pos*BITS_PER_UNITSET)
 			for idx := l0pos / BITS_PER_UNIT; idx < l0end/BITS_PER_UNIT &&
 				length > allocated; idx++ {
-				if idx == 119 {
-					print("fssdf")
-				}
 				val := &(b.level0[idx])
 				if *val == ALL_UNIT_CLEAR {
 					continue
-				} else if *val == ALL_UNIT_SET {
-
 				}
 				if idx == l0pos/BITS_PER_UNIT {
 					l0freePos = b.getBitPos(*val, 0)

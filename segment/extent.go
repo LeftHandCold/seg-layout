@@ -10,3 +10,7 @@ type Extent struct {
 func (ex Extent) End() uint32 {
 	return ex.offset + ex.length
 }
+
+func (ex Extent) PageEnd() uint32 {
+	return ex.pageOffset + ex.pageNum
+}
