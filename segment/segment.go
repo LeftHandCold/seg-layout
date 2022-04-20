@@ -138,10 +138,10 @@ func (s *Segment) Update(fd *BlockFile, pl []byte, fOffset uint64) {
 	offset, allocated := s.allocator.Allocate(uint64(len(pl)))
 	free := fd.Update(DATA_START+offset, pl, uint32(fOffset))
 	for _, ext := range free {
-		s.allocator.Free(ext.offset, ext.length)
+		s.allocator.Free(ext.offset-DATA_START, ext.length)
 	}
 	logutil.Infof("updagte level1 is %x, level0 is %x, offset is %d, allocated is %d",
-		s.allocator.level1[0], s.allocator.level0[0], s.allocator.lastPos-DATA_START, allocated)
+		s.allocator.level1[0], s.allocator.level0[0], s.allocator.lastPos, allocated)
 	s.log.Append(fd)
 
 }
