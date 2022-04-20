@@ -26,8 +26,6 @@ func (l Log) Append(file *BlockFile) {
 	for _, ext := range file.snode.extents {
 		binary.Write(&ibuffer, binary.BigEndian, ext.offset)
 		binary.Write(&ibuffer, binary.BigEndian, ext.length)
-		binary.Write(&ibuffer, binary.BigEndian, ext.pageOffset)
-		binary.Write(&ibuffer, binary.BigEndian, ext.pageNum)
 	}
 
 	ibufLen := (segment.super.blockSize - (uint32(ibuffer.Len()) % segment.super.blockSize)) + uint32(ibuffer.Len())

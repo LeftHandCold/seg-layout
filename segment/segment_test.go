@@ -40,8 +40,9 @@ func TestSegment_Init(t *testing.T) {
 		zero := make([]byte, ibufLen-uint32(sbuffer.Len()))
 		binary.Write(&sbuffer, binary.BigEndian, zero)
 	}
-	seg.Update(file, sbuffer.Bytes(), 8192)
+	seg.Update(file, sbuffer.Bytes(), 16384)
 	//seg.Update(file, []byte(fmt.Sprintf("this is tests %d", 517)), 8192)
+	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
 	/*seg.Free(file, 1)
 	seg.Free(file, 40)

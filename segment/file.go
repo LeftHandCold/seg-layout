@@ -16,7 +16,6 @@ type BlockFile struct {
 func (b *BlockFile) Append(offset uint64, data []byte) {
 	var sbuffer bytes.Buffer
 	binary.Write(&sbuffer, binary.BigEndian, data)
-	//cbufLen := (b.segment.super.blockSize - (uint32(sbuffer.Len()) % b.segment.super.blockSize)) + uint32(sbuffer.Len())
 	cbufLen := uint32(p2roundup(uint64(sbuffer.Len()), uint64(b.segment.super.blockSize)))
 	if cbufLen > uint32(sbuffer.Len()) {
 		zero := make([]byte, cbufLen-uint32(sbuffer.Len()))
@@ -31,10 +30,8 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 		panic("write is failed")
 	}
 	b.snode.extents = append(b.snode.extents, Extent{
-		offset:     uint32(offset),
-		length:     cbufLen,
-		pageOffset: uint32(b.snode.size) / b.segment.super.blockSize,
-		pageNum:    cbufLen / b.segment.super.blockSize,
+		offset: uint32(offset),
+		length: cbufLen,
 	})
 	logutil.Infof("extents is %d", len(b.snode.extents))
 	b.snode.size += uint64(cbufLen)
@@ -138,7 +135,9 @@ func (b *BlockFile) repairExtent(offset, fOffset, length uint32) []Extent {
 		freeLength -= xLen
 		idx++
 	}
-	extentsRemove(&b.snode.extents, remove)
+	if len(remove) > 0 {
+		extentsRemove(&b.snode.extents, remove)
+	}
 	extentsInsert(&b.snode.extents, num+1, vals)
 	return free
 }
@@ -146,7 +145,6 @@ func (b *BlockFile) repairExtent(offset, fOffset, length uint32) []Extent {
 func (b *BlockFile) Update(offset uint64, data []byte, fOffset uint32) []Extent {
 	var sbuffer bytes.Buffer
 	binary.Write(&sbuffer, binary.BigEndian, data)
-	//cbufLen := (b.segment.super.blockSize - (uint32(sbuffer.Len()) % b.segment.super.blockSize)) + uint32(sbuffer.Len())
 	cbufLen := uint32(p2roundup(uint64(sbuffer.Len()), uint64(b.segment.super.blockSize)))
 	if cbufLen > uint32(sbuffer.Len()) {
 		zero := make([]byte, cbufLen-uint32(sbuffer.Len()))
