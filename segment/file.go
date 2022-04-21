@@ -93,7 +93,7 @@ func (b *BlockFile) repairExtent(offset, fOffset, length uint32) []Extent {
 	freeLength := length
 	idx := num
 	for {
-		if freeLength == 0 {
+		if freeLength == 0 || idx == len(b.snode.extents) {
 			break
 		}
 		e := &b.snode.extents[idx]
