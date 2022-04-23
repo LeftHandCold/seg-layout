@@ -24,6 +24,7 @@ func (l Log) Append(file *BlockFile) {
 	binary.Write(&ibuffer, binary.BigEndian, file.snode.size)
 	binary.Write(&ibuffer, binary.BigEndian, uint64(len(file.snode.extents)))
 	for _, ext := range file.snode.extents {
+		binary.Write(&ibuffer, binary.BigEndian, ext.typ)
 		binary.Write(&ibuffer, binary.BigEndian, ext.offset)
 		binary.Write(&ibuffer, binary.BigEndian, ext.length)
 	}

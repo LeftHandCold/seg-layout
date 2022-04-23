@@ -34,6 +34,7 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 		b.snode.extents[len(b.snode.extents)-1].length += cbufLen
 	} else {
 		b.snode.extents = append(b.snode.extents, Extent{
+			typ:    APPEND,
 			offset: uint32(offset),
 			length: cbufLen,
 		})
@@ -78,6 +79,7 @@ func (b *BlockFile) repairExtent(offset, fOffset, length uint32) []Extent {
 	}
 	oldOff := b.snode.extents[num].offset
 	if fOffset == 0 && ext.length-fOffset-length == 0 {
+		b.snode.extents[num].typ = UPDATE
 		b.snode.extents[num].offset = offset
 		free = append(free, Extent{
 			offset: oldOff,
@@ -88,6 +90,7 @@ func (b *BlockFile) repairExtent(offset, fOffset, length uint32) []Extent {
 	vals := make([]Extent, 1)
 	vals[0].offset = offset
 	vals[0].length = length
+	vals[0].typ = UPDATE
 	if remaining > 0 {
 		b.snode.extents[num].length = fOffset
 		vals = append(vals, Extent{
