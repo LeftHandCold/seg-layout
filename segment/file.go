@@ -29,10 +29,15 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 	if err != nil {
 		panic("write is failed")
 	}
-	b.snode.extents = append(b.snode.extents, Extent{
-		offset: uint32(offset),
-		length: cbufLen,
-	})
+	if len(b.snode.extents) > 0 &&
+		b.snode.extents[len(b.snode.extents)-1].End() == uint32(offset) {
+		b.snode.extents[len(b.snode.extents)-1].length += cbufLen
+	} else {
+		b.snode.extents = append(b.snode.extents, Extent{
+			offset: uint32(offset),
+			length: cbufLen,
+		})
+	}
 	logutil.Infof("extents is %d", len(b.snode.extents))
 	b.snode.size += uint64(cbufLen)
 }

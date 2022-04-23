@@ -18,7 +18,7 @@ func TestSegment_Init(t *testing.T) {
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
 	seg.Update(file, []byte(fmt.Sprintf("this is tests %d", 517)), 4096)
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 518)))*/
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 2; i++ {
 		var sbuffer bytes.Buffer
 		binary.Write(&sbuffer, binary.BigEndian, []byte(fmt.Sprintf("this is tests %d", 515)))
 		var size uint32 = 262144
@@ -49,5 +49,4 @@ func TestSegment_Init(t *testing.T) {
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 513)))
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 514)))
 	seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 515)))*/
-
 }
