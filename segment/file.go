@@ -23,10 +23,12 @@ func (b *BlockFile) Append(offset uint64, data []byte) {
 	}
 	_, err := b.segment.segFile.Seek(int64(offset), io.SeekStart)
 	if err != nil {
+		//panic(any("seek is failed"))
 		panic("seek is failed")
 	}
 	_, err = b.segment.segFile.Write(sbuffer.Bytes())
 	if err != nil {
+		//panic(any("write is failed"))
 		panic("write is failed")
 	}
 	if len(b.snode.extents) > 0 &&
@@ -160,12 +162,62 @@ func (b *BlockFile) Update(offset uint64, data []byte, fOffset uint32) []Extent 
 	}
 	_, err := b.segment.segFile.Seek(int64(offset), io.SeekStart)
 	if err != nil {
+		//panic(any("seek is failed"))
 		panic("seek is failed")
 	}
 	_, err = b.segment.segFile.Write(sbuffer.Bytes())
 	if err != nil {
+		//panic(any("write is failed"))
 		panic("write is failed")
 	}
 	logutil.Infof("extents is %d", len(b.snode.extents))
 	return b.repairExtent(uint32(offset), fOffset, cbufLen)
+}
+
+func (b *BlockFile) GetExtents() *[]Extent {
+	return &b.snode.extents
+}
+
+func (b *BlockFile) Read(offset, length uint32, data *bytes.Buffer) uint32 {
+	remain := uint32(b.snode.size) - offset - length
+	num := 0
+	for _, extent := range b.snode.extents {
+		if offset >= extent.length {
+			offset -= extent.length
+		} else {
+			break
+		}
+		num++
+	}
+	var read uint32 = 0
+	for {
+		if length == 0 || length == remain {
+			return read
+		}
+		buf := data.Bytes()
+		readOne := length
+		if offset > 0 {
+			if b.snode.extents[num].length-offset < length {
+				readOne = b.snode.extents[num].length - offset
+			}
+			offset = 0
+		} else if b.snode.extents[num].length < length {
+			readOne = b.snode.extents[num].length
+		}
+		buf = buf[read : read+readOne]
+		_, err := b.segment.segFile.Seek(int64(b.snode.extents[num].offset)+int64(offset), io.SeekStart)
+		if err != nil {
+			//panic(any("seek is failed"))
+			panic("seek is failed")
+		}
+		_, err = b.segment.segFile.Read(buf)
+		if err != nil {
+			//panic(any("read is failed"))
+			panic("read is failed")
+		}
+		read += readOne
+		length -= readOne
+		num++
+	}
+	//binary.Write(&sbuffer, binary.BigEndian, zero)
 }

@@ -128,6 +128,7 @@ func (s *Segment) Append(fd *BlockFile, pl []byte) {
 	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
 		s.allocator.level1[0], s.allocator.level0[0], offset, allocated)
 	if allocated == 0 {
+		//panic(any("no space"))
 		panic("no space")
 	}
 	fd.Append(DATA_START+offset, pl)

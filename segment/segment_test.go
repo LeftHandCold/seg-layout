@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/matrixorigin/matrixone/pkg/logutil"
 	"testing"
 )
 
@@ -41,6 +42,11 @@ func TestSegment_Init(t *testing.T) {
 		binary.Write(&sbuffer, binary.BigEndian, zero)
 	}
 	seg.Update(file, sbuffer.Bytes(), 16384)
+	b := bytes.NewBuffer(make([]byte, 1<<20))
+	file.Read(0, uint32(file.snode.size), b)
+	buf := b.Bytes()
+	buf = buf[16384 : 16384+17]
+	logutil.Infof("%v", string(buf))
 	//seg.Update(file, []byte(fmt.Sprintf("this is tests %d", 517)), 8192)
 	//seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
 	//seg.Append(file, []byte(fmt.Sprintf("this is tests %d", 516)))
