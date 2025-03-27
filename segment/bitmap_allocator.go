@@ -1,146 +1,148 @@
 package segment
 
-const UNIT_BYTES = 8 // Length of uint64 bytes
-const UNITS_PER_UNITSET = 8
-const UNITSET_BYTES = UNIT_BYTES * UNITS_PER_UNITSET
-const BITS_PER_UNIT = UNIT_BYTES * 8
-const BITS_PER_UNITSET = UNITSET_BYTES * 8
-const ALL_UNIT_SET = 0xffffffffffffffff
-const ALL_UNIT_CLEAR = 0
+import (
+	"sync"
+)
 
+const (
+	// Bitmap constants
+	unitBytes       = 8                 // Length of uint64 bytes (2^3)
+	unitsPerUnitSet = 8                 // 2^3
+	unitSetBytes    = unitBytes << 3    // 2^6
+	bitsPerUnit     = unitBytes << 3    // 2^6
+	bitsPerUnitSet  = unitSetBytes << 3 // 2^9
+	allUnitSet      = 0xffffffffffffffff
+	allUnitClear    = 0
+
+	// Allocation constants
+	blockSize   = 4 << 10 // 4 KiB (2^12)
+	maxDiskSize = 1 << 40 // 1 TiB (2^40)
+)
+
+// BitmapAllocator manages space allocation using a two-level bitmap
 type BitmapAllocator struct {
-	pageSize  uint32
-	level0    []uint64
-	level1    []uint64
-	available uint64
-	lastPos   uint64
+	level0    []uint64 // Level 0 bitmap for individual blocks
+	level1    []uint64 // Level 1 bitmap for unit sets
+	totalSize uint64   // Total size of managed space
+	pageSize  uint32   // Size of each page
+	allocated uint64   // Total allocated space
+	mu        sync.RWMutex
 }
 
-func p2align(x uint64, align uint64) uint64 {
-	return x & -align
+// NewBitmapAllocator creates a new bitmap allocator
+func NewBitmapAllocator() *BitmapAllocator {
+	return &BitmapAllocator{
+		pageSize: 4096, // Default page size
+	}
 }
 
-func p2roundup(x uint64, align uint64) uint64 {
-	return -(-x & -align)
-}
+// Init initializes the bitmap allocator with the specified size
+func (b *BitmapAllocator) Init(size uint64, pageSize uint32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-func (b *BitmapAllocator) Init(capacity uint64, pageSize uint32) {
+	b.totalSize = size
 	b.pageSize = pageSize
-	l0granularity := pageSize
-	l1granularity := l0granularity * BITS_PER_UNITSET
-	l0UnitCount := capacity / uint64(l0granularity) / BITS_PER_UNIT
-	b.level0 = make([]uint64, l0UnitCount)
-	for i, _ := range b.level0 {
-		b.level0[i] = ALL_UNIT_SET
+
+	// Calculate number of bits needed for level 0
+	numBits := (size + uint64(pageSize) - 1) / uint64(pageSize)
+	numWords := (numBits + 63) / 64
+	b.level0 = make([]uint64, numWords)
+
+	// Calculate number of bits needed for level 1
+	numLevel1Words := (numWords + bitsPerUnitSet - 1) / bitsPerUnitSet
+	b.level1 = make([]uint64, numLevel1Words)
+
+	// Initialize all bits to 0 (free)
+	for i := range b.level0 {
+		b.level0[i] = allUnitClear
+	}
+	for i := range b.level1 {
+		b.level1[i] = allUnitClear
 	}
 
-	l1UnitCount := capacity / uint64(l1granularity) / BITS_PER_UNIT
-	if l1UnitCount == 0 {
-		l1UnitCount = 1
-	}
-	b.level1 = make([]uint64, l1UnitCount)
-	for i, _ := range b.level1 {
-		b.level1[i] = ALL_UNIT_SET
-	}
-	b.available = p2align(capacity, uint64(pageSize))
-	b.lastPos = 0
+	b.allocated = 0
 }
 
-func (b *BitmapAllocator) markAllocFree0(start, length uint64, free bool) {
-	pos := start
-	var bit uint64 = 1 << (start % BITS_PER_UNIT)
-	bitpos := pos / BITS_PER_UNIT
-	val := &(b.level0[bitpos])
-	end := length
-	if end > p2roundup(pos+1, BITS_PER_UNIT) {
-		end = p2roundup(pos+1, BITS_PER_UNIT)
+// Allocate allocates space of the specified size
+func (b *BitmapAllocator) Allocate(size uint32) *Result {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if size == 0 {
+		return &Result{Success: false}
 	}
-	for {
-		if pos >= end {
-			break
-		}
-		if free {
-			*val |= bit
-		} else {
-			*val &= ^bit
-		}
-		bit <<= 1
-		pos++
+	length := bitmapRoundup(uint64(size), uint64(b.pageSize))
+	// Calculate number of pages needed
+	numPages := (length + uint64(b.pageSize) - 1) / uint64(b.pageSize)
+
+	// Check if we have enough total space
+	if numPages*uint64(b.pageSize) > b.totalSize-b.allocated {
+		return &Result{Success: false}
 	}
 
-	end = length
-	if end > p2align(length, BITS_PER_UNIT) {
-		end = p2align(length, BITS_PER_UNIT)
-	}
-	for {
-		if pos >= end {
-			break
-		}
-		bitpos++
-		val = &(b.level0[bitpos])
-		if free {
-			*val = ALL_UNIT_SET
-		} else {
-			*val = ALL_UNIT_CLEAR
-		}
-		pos += BITS_PER_UNIT
+	startBit := b.findFreeSpace(numPages)
+	if startBit == ^uint64(0) {
+		return &Result{Success: false}
 	}
 
-	bit = 1
-	bitpos++
-	val = &(b.level0[bitpos])
-	for {
-		if pos >= length {
-			break
-		}
-		if free {
-			*val |= bit
-		} else {
-			*val &= ^bit
-		}
-		bit <<= 1
-		pos++
+	// Verify the allocation is within bounds
+	if startBit*uint64(b.pageSize)+length > b.totalSize {
+		return &Result{Success: false}
+	}
+
+	// Mark space as allocated in both levels
+	b.markAllocated(startBit, numPages)
+	b.allocated += length
+
+	return &Result{
+		Success: true,
+		Offset:  startBit * uint64(b.pageSize),
+		Size:    length,
 	}
 }
 
-func (b *BitmapAllocator) markLevel1(start, length uint64, free bool) {
-	if start%UNITSET_BYTES != 0 {
-		panic("start align error")
-	} else if length%UNITSET_BYTES != 0 {
-		panic("length align error")
-	}
-	clear := true
-	for idx := start / BITS_PER_UNIT; idx < length/BITS_PER_UNIT; idx++ {
-		val := &(b.level0[idx])
-		if *val != ALL_UNIT_CLEAR {
-			clear = false
-		}
-	}
-	pos := start / BITS_PER_UNIT
-	//end := length / BITS_PER_UNIT
-	l1pos := start / BITS_PER_UNITSET
-	pos++
-	pos = p2roundup(pos, UNITS_PER_UNITSET)
-	if !free && clear {
+// Free releases allocated space
+func (b *BitmapAllocator) Free(offset, size uint32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-		if (pos % UNITS_PER_UNITSET) == 0 {
-			l1val := &(b.level1[l1pos/BITS_PER_UNIT])
-			var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
-			*l1val &= ^bit
-		}
-	} else if free && !clear {
-		if (pos % UNITS_PER_UNITSET) == 0 {
-			l1val := &(b.level1[l1pos/BITS_PER_UNIT])
-			var bit uint64 = 1 << (l1pos % BITS_PER_UNIT)
-			*l1val |= bit
-		}
+	startBit := uint64(offset) / uint64(b.pageSize)
+	numPages := (uint64(size) + uint64(b.pageSize) - 1) / uint64(b.pageSize)
+	b.markFree(startBit, numPages)
+	if b.allocated >= uint64(size) {
+		b.allocated -= uint64(size)
 	}
+}
+
+// GetUtilization returns the current space utilization
+func (b *BitmapAllocator) GetUtilization() float64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.totalSize == 0 {
+		return 0
+	}
+	return float64(b.allocated) / float64(b.totalSize)
+}
+
+// GetTotalAllocated returns the total allocated space
+func (b *BitmapAllocator) GetTotalAllocated() uint64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.allocated
+}
+
+// GetMemoryUsage returns the memory usage of the allocator
+func (b *BitmapAllocator) GetMemoryUsage() uint64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return uint64(len(b.level0)*8 + len(b.level1)*8)
 }
 
 func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 	var mask uint64 = 1 << start
 	for {
-		if (start < BITS_PER_UNIT) && (val&mask) == 0 {
+		if (start < bitsPerUnit) && (val&mask) == 0 {
 			mask <<= 1
 			start++
 			continue
@@ -150,85 +152,206 @@ func (b *BitmapAllocator) getBitPos(val uint64, start uint32) uint32 {
 	return start
 }
 
-func (b *BitmapAllocator) Free(start uint32, len uint32) {
-	pos := start / b.pageSize
-	end := pos + len/b.pageSize
-	b.markAllocFree0(uint64(pos), uint64(end), true)
-	l0start := p2align(uint64(pos), BITS_PER_UNITSET)
-	l0end := p2roundup(uint64(end), BITS_PER_UNITSET)
-	b.markLevel1(l0start, l0end, true)
-	b.lastPos = uint64(start)
-}
+// findFreeSpace finds a contiguous block of free space using two-level bitmap
+func (b *BitmapAllocator) findFreeSpace(numPages uint64) uint64 {
+	if len(b.level0) == 0 || len(b.level1) == 0 || numPages == 0 {
+		return ^uint64(0)
+	}
+	// Calculate total available bits
+	totalBits := uint64(len(b.level0)) * 64
+	if totalBits*uint64(b.pageSize) > b.totalSize {
+		totalBits = (b.totalSize + uint64(b.pageSize) - 1) / uint64(b.pageSize)
+	}
 
-func (b *BitmapAllocator) Allocate(len uint64) (uint64, uint64) {
-	length := p2roundup(len, uint64(b.pageSize))
-	var allocated uint64 = 0
-	l1pos := b.lastPos / uint64(b.pageSize) / BITS_PER_UNITSET / BITS_PER_UNIT
-	l1end := cap(b.level1)
-	var needPage, allocatedPage, l0freePos, nextPos uint32
-	needPage = uint32(length-allocated) / b.pageSize
-	allocatedPage = 0
-	//pos := b.lastPos / uint64(b.pageSize)
-	for ; length > allocated && l1pos < uint64(l1end); l1pos++ {
-		l1bit := b.level1[l1pos]
-		if l1bit == ALL_UNIT_CLEAR {
-			b.lastPos += BITS_PER_UNITSET * uint64(b.pageSize)
+	var consecutive uint64
+	var foundStart uint64
+
+	// First, check level1 to find potential free regions
+	for unitSetIdx := uint64(0); unitSetIdx < uint64(len(b.level1)); unitSetIdx++ {
+		// Skip if this unit set is fully allocated
+		if b.level1[unitSetIdx] == allUnitSet {
 			continue
 		}
-		// get level1 free start bit
-		l1freePos := b.getBitPos(l1bit, 0)
-		for {
-			l0pos := l1freePos*BITS_PER_UNITSET + uint32(l1pos*BITS_PER_UNITSET)
-			l0end := (l1freePos+1)*BITS_PER_UNITSET + uint32(l1pos*BITS_PER_UNITSET)
-			for idx := l0pos / BITS_PER_UNIT; idx < l0end/BITS_PER_UNIT &&
-				length > allocated; idx++ {
-				val := &(b.level0[idx])
-				if *val == ALL_UNIT_CLEAR {
-					continue
-				}
-				if idx == l0pos/BITS_PER_UNIT {
-					l0freePos = b.getBitPos(*val, 0)
-					nextPos = l0freePos + 1
+
+		// Check each bit in the unit set
+		for bitIdx := uint64(0); bitIdx < 64; bitIdx++ {
+			if b.level1[unitSetIdx]&(uint64(1)<<bitIdx) == 0 {
+				// Found a potentially free unit set
+				// Calculate the starting bit position in level0
+				startBit := (unitSetIdx*64 + bitIdx) * bitsPerUnitSet
+				endBit := startBit + bitsPerUnitSet
+				if endBit > totalBits {
+					endBit = totalBits
 				}
 
-				for {
-					if nextPos >= BITS_PER_UNIT ||
-						allocatedPage >= needPage-1 {
+				// Check level0 for consecutive free pages
+				for bit := startBit; bit < endBit; bit++ {
+					wordIdx := bit / 64
+					bitPos := bit % 64
+					if wordIdx >= uint64(len(b.level0)) {
 						break
 					}
-					if (*val & (1 << nextPos)) == 0 {
-						l0freePos = b.getBitPos(*val, nextPos+1)
-						nextPos = l0freePos + 1
-						allocatedPage = 0
+
+					if b.level0[wordIdx]&(uint64(1)<<bitPos) == 0 {
+						if consecutive == 0 {
+							foundStart = bit
+						}
+						consecutive++
+						if consecutive >= numPages {
+							return foundStart
+						}
 					} else {
-						nextPos++
-						allocatedPage++
+						consecutive = 0
+						foundStart = 0
 					}
 				}
-				allocatedPage++
-				if allocatedPage < needPage {
-					l0freePos = 0
-					nextPos = l0freePos + 1
-					continue
+
+				// If we found some free pages but not enough, continue searching
+				// in the next unit set
+				if consecutive > 0 {
+					// Check if we can find more free pages in the next unit set
+					nextUnitSet := unitSetIdx + 1
+					if nextUnitSet < uint64(len(b.level1)) && b.level1[nextUnitSet]&(uint64(1)<<0) == 0 {
+						nextStartBit := nextUnitSet * 64 * bitsPerUnitSet
+						nextEndBit := nextStartBit + bitsPerUnitSet
+						if nextEndBit > totalBits {
+							nextEndBit = totalBits
+						}
+
+						for bit := nextStartBit; bit < nextEndBit; bit++ {
+							wordIdx := bit / 64
+							bitPos := bit % 64
+							if wordIdx >= uint64(len(b.level0)) {
+								break
+							}
+
+							if b.level0[wordIdx]&(uint64(1)<<bitPos) == 0 {
+								consecutive++
+								if consecutive >= numPages {
+									return foundStart
+								}
+							} else {
+								break
+							}
+						}
+					}
 				}
-				allocated += uint64(needPage * b.pageSize)
-				l0start := uint64(idx)*BITS_PER_UNIT + uint64(l0freePos)
-				//b.lastPos = l0start * uint64(b.pageSize)
-				l0end := l0start + uint64(needPage)
-				b.markAllocFree0(l0start, l0end, false)
-				l0start = p2align(l0start, BITS_PER_UNITSET)
-				l0end = p2roundup(l0end, BITS_PER_UNITSET)
-				b.markLevel1(l0start, l0end, false)
-				offset := b.lastPos
-				b.lastPos += allocated
-				return offset, allocated
-			}
-			l1freePos++
-			if l1freePos >= BITS_PER_UNIT {
-				break
+			} else {
+				consecutive = 0
+				foundStart = 0
 			}
 		}
 	}
 
-	return 0, 0
+	return ^uint64(0)
+}
+
+// bitmapAlign aligns x to the nearest lower multiple of align
+func bitmapAlign(x uint64, align uint64) uint64 {
+	return x & -align
+}
+
+// bitmapRoundup rounds x up to the nearest multiple of align
+func bitmapRoundup(x uint64, align uint64) uint64 {
+	return -(-x & -align)
+}
+
+// markAllocated marks a range of bits as allocated in both levels
+func (b *BitmapAllocator) markAllocated(startBit, numPages uint64) {
+	// Mark bits in level0
+	endBit := startBit + numPages
+	for bit := startBit; bit < endBit; bit++ {
+		wordIdx := bit / 64
+		bitPos := bit % 64
+		if wordIdx >= uint64(len(b.level0)) {
+			break
+		}
+		b.level0[wordIdx] |= uint64(1) << bitPos
+	}
+	startBit = p2align(startBit, bitsPerUnitSet)
+	endBit = p2roundup(endBit, bitsPerUnitSet)
+	// Update level1 bitmap
+	startUnitSet := startBit / bitsPerUnitSet
+	endUnitSet := (endBit + bitsPerUnitSet - 1) / bitsPerUnitSet
+	for unitSet := startUnitSet; unitSet < endUnitSet; unitSet++ {
+		if unitSet >= uint64(len(b.level1))*64 {
+			break
+		}
+		// Check if any bits in the unit set are allocated
+		startWord := unitSet * bitsPerUnitSet / 64
+		endWord := (unitSet + 1) * bitsPerUnitSet / 64
+		if endWord > uint64(len(b.level0)) {
+			endWord = uint64(len(b.level0))
+		}
+
+		// Check if all bits in the unit set are allocated
+		allAllocated := true
+		for wordIdx := startWord; wordIdx < endWord; wordIdx++ {
+			if b.level0[wordIdx] != allUnitSet {
+				allAllocated = false
+				break
+			}
+		}
+		// Update level1 bitmap
+		level1Idx := unitSet / 64
+		level1Bit := unitSet % 64
+		if level1Idx < uint64(len(b.level1)) {
+			if allAllocated {
+				b.level1[level1Idx] |= uint64(1) << level1Bit
+			}
+		}
+	}
+}
+
+// markFree marks a range of bits as free in both levels
+func (b *BitmapAllocator) markFree(startBit, numPages uint64) {
+	// Mark bits in level0
+	endBit := startBit + numPages
+	for bit := startBit; bit < endBit; bit++ {
+		wordIdx := bit / 64
+		bitPos := bit % 64
+		if wordIdx >= uint64(len(b.level0)) {
+			break
+		}
+		b.level0[wordIdx] &= ^(uint64(1) << bitPos)
+	}
+
+	// Update level1 bitmap
+	startUnitSet := startBit / bitsPerUnitSet
+	endUnitSet := (endBit + bitsPerUnitSet - 1) / bitsPerUnitSet
+	for unitSet := startUnitSet; unitSet < endUnitSet; unitSet++ {
+		if unitSet >= uint64(len(b.level0))*64/bitsPerUnitSet {
+			break
+		}
+		// Check if any bits in the unit set are allocated
+		startWord := unitSet * bitsPerUnitSet / 64
+		endWord := (unitSet + 1) * bitsPerUnitSet / 64
+		if endWord > uint64(len(b.level0)) {
+			endWord = uint64(len(b.level0))
+		}
+
+		hasAllocated := false
+		for wordIdx := startWord; wordIdx < endWord; wordIdx++ {
+			if b.level0[wordIdx] != allUnitClear {
+				hasAllocated = true
+				break
+			}
+		}
+
+		level1Idx := unitSet / 64
+		level1Bit := unitSet % 64
+		if hasAllocated {
+			b.level1[level1Idx] |= uint64(1) << level1Bit
+		} else {
+			b.level1[level1Idx] &= ^(uint64(1) << level1Bit)
+		}
+	}
+}
+
+func p2align(x uint64, align uint64) uint64 {
+	return x & -align
+}
+
+func p2roundup(x uint64, align uint64) uint64 {
+	return -(-x & -align)
 }
