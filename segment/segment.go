@@ -1,160 +1,117 @@
 package segment
 
 import (
-	"bytes"
-	"encoding/binary"
-	"github.com/matrixorigin/matrixone/pkg/compress"
-	"github.com/matrixorigin/matrixone/pkg/logutil"
-	"os"
+	"fmt"
+	"sync"
+	"time"
 )
 
-const SIZE = 2 * 1024 * 1024 * 1024
-const LOG_START = 2 * 4096
-const DATA_START = LOG_START + 1024*4096
-const DATA_SIZE = SIZE - DATA_START
-const LOG_SIZE = DATA_START - LOG_START
-
-type SuperBlock struct {
-	version   uint64
-	blockSize uint32
-	colCnt    uint32
-	lognode   Inode
-}
-
+// Segment represents a memory segment with allocation capabilities
 type Segment struct {
-	segFile   *os.File
-	lastInode uint64
-	super     SuperBlock
-	nodes     map[string]*BlockFile
-	log       *Log
-	allocator *BitmapAllocator
+	allocator    *BitmapAllocator // Main space allocator
+	preallocator *Preallocator    // Pre-allocation manager
+	mu           sync.RWMutex     // Read-write mutex for thread safety
 }
 
-func (s *Segment) Init() {
-	s.super = SuperBlock{
-		version:   1,
-		blockSize: 4096,
-		colCnt:    5,
-	}
-	log := Inode{
-		inode: 1,
-		size:  0,
-	}
+// NewSegment creates a new segment with the specified size
+func NewSegment(size uint64) (*Segment, error) {
+	// Create bitmap allocator
+	allocator := NewBitmapAllocator()
+	allocator.Init(size, 4096)
 
-	s.super.lognode = log
-	segmentFile, err := os.Create("1.segment")
-	s.segFile = segmentFile
-	if err != nil {
-		return
-	}
-	err = s.segFile.Truncate(SIZE)
+	// Create preallocator with default configuration
+	preallocator := NewPreallocator(allocator, PreallocConfig{
+		InitialSize:   1024 * 1024, // 1MB
+		GrowthFactor:  1.5,
+		MaxSize:       100 * 1024 * 1024, // 100MB
+		CheckInterval: 5 * time.Minute,
+		MinFreeSpace:  10 * 1024 * 1024, // 10MB
+	})
 
-	if err != nil {
-		return
-	}
-	var sbuffer bytes.Buffer
-	/*header := make([]byte, 32)
-	copy(header, encoding.EncodeUint64(sb.version))*/
-	err = binary.Write(&sbuffer, binary.BigEndian, s.super.version)
-	if err != nil {
-		return
-	}
-	binary.Write(&sbuffer, binary.BigEndian, uint8(compress.Lz4))
-	binary.Write(&sbuffer, binary.BigEndian, s.super.blockSize)
-	binary.Write(&sbuffer, binary.BigEndian, s.super.colCnt)
-
-	cbufLen := (s.super.blockSize - (uint32(sbuffer.Len()) % s.super.blockSize)) + uint32(sbuffer.Len())
-
-	if cbufLen > uint32(sbuffer.Len()) {
-		zero := make([]byte, cbufLen-uint32(sbuffer.Len()))
-		binary.Write(&sbuffer, binary.BigEndian, zero)
-	}
-
-	len, err := s.segFile.Write(sbuffer.Bytes())
-	logutil.Infof("superblock len is %d", len)
-	s.segFile.Sync()
+	return &Segment{
+		allocator:    allocator,
+		preallocator: preallocator,
+	}, nil
 }
 
-func (s *Segment) Mount() {
-	s.lastInode = 1
-	var seq uint64
-	seq = 0
-	s.nodes = make(map[string]*BlockFile, 4096)
-	ino := Inode{inode: s.super.lognode.inode}
-	logFile := &BlockFile{
-		snode:   ino,
-		name:    "logfile",
-		segment: s,
-	}
-	s.log = &Log{}
-	s.log.logFile = logFile
-	s.log.offset = LOG_START + s.log.logFile.snode.size
-	s.log.seq = seq + 1
-	s.nodes[logFile.name] = s.log.logFile
-	s.allocator = &BitmapAllocator{
-		pageSize: s.GetPageSize(),
-	}
-	s.log.allocator = &BitmapAllocator{
-		pageSize: s.GetPageSize(),
+// Allocate allocates space of the specified size
+func (s *Segment) Allocate(size uint64) (*Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Try to get pre-allocated space first
+	offset, size, found := s.preallocator.GetSpace(size)
+	if found {
+		return &Result{
+			Success: true,
+			Offset:  offset,
+			Size:    size,
+		}, nil
 	}
 
-	s.allocator.Init(DATA_SIZE, s.GetPageSize())
-	s.log.allocator.Init(LOG_SIZE, s.GetPageSize())
+	// If no pre-allocated space available, allocate new space
+	result := s.allocator.Allocate(uint32(size))
+	if !result.Success {
+		return nil, fmt.Errorf("failed to allocate space")
+	}
+	return result, nil
 }
 
-func (s *Segment) NewBlockFile(fname string) *BlockFile {
-	file := s.nodes[fname]
-	var ino Inode
-	if file == nil {
-		ino = Inode{
-			inode:      s.lastInode + 1,
-			size:       0,
-			extents:    make([]Extent, 0),
-			logExtents: Extent{},
-		}
-	}
-	file = &BlockFile{
-		snode:   ino,
-		name:    fname,
-		segment: s,
-	}
-	s.nodes[file.name] = file
-	s.lastInode += 1
-	return file
+// Free releases allocated space
+func (s *Segment) Free(offset, size uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Try to return to pre-allocator first
+	s.preallocator.ReturnSpace(offset, size)
+
+	// Also free from the main allocator
+	s.allocator.Free(uint32(offset), uint32(size))
+	return nil
 }
 
-func (s *Segment) Append(fd *BlockFile, pl []byte) {
-	offset, allocated := s.allocator.Allocate(uint64(len(pl)))
-	logutil.Infof("level1 is %x, level0 is %x, offset is %d, allocated is %d",
-		s.allocator.level1[0], s.allocator.level0[0], offset, allocated)
-	if allocated == 0 {
-		//panic(any("no space"))
-		panic("no space")
-	}
-	fd.Append(DATA_START+offset, pl)
-	s.log.Append(fd)
+// GetUtilization returns the current space utilization
+func (s *Segment) GetUtilization() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.allocator.GetUtilization()
 }
 
-func (s *Segment) Update(fd *BlockFile, pl []byte, fOffset uint64) {
-	offset, allocated := s.allocator.Allocate(uint64(len(pl)))
-	free := fd.Update(DATA_START+offset, pl, uint32(fOffset))
-	for _, ext := range free {
-		s.allocator.Free(ext.offset-DATA_START, ext.length)
-	}
-	logutil.Infof("updagte level1 is %x, level0 is %x, offset is %d, allocated is %d",
-		s.allocator.level1[0], s.allocator.level0[0], s.allocator.lastPos, allocated)
-	s.log.Append(fd)
-
+// GetTotalAllocated returns the total allocated space
+func (s *Segment) GetTotalAllocated() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.allocator.GetTotalAllocated()
 }
 
-func (s *Segment) Free(fd *BlockFile, n uint32) {
-	for i, ext := range fd.snode.extents {
-		if i == int(n-1) {
-			s.allocator.Free(ext.offset-DATA_START, ext.length)
-		}
-	}
+// GetMemoryUsage returns the memory usage of the segment
+func (s *Segment) GetMemoryUsage() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.allocator.GetMemoryUsage()
 }
 
-func (s *Segment) GetPageSize() uint32 {
-	return s.super.blockSize
+// Close closes the segment and frees all resources
+func (s *Segment) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Close preallocator
+	s.preallocator.Close()
+
+	// Reset allocator
+	s.allocator = nil
+	s.preallocator = nil
+
+	return nil
+}
+
+// String returns a string representation of the segment
+func (s *Segment) String() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return fmt.Sprintf("Segment(utilization=%.2f%%, total_allocated=%d, memory_usage=%d)",
+		s.GetUtilization()*100,
+		s.GetTotalAllocated(),
+		s.GetMemoryUsage())
 }
