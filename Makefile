@@ -9,7 +9,7 @@ BINARY_NAME=seg-layout
 
 # Build flags
 LDFLAGS=-ldflags "-w -s"
-DEBUG_LDFLAGS=-ldflags "-w -s -X main.Debug=true"
+DEBUG_FLAGS=-gcflags "all=-N -l"
 
 # Build targets
 .PHONY: all build clean test deps debug
@@ -20,7 +20,7 @@ build:
 	$(GOBUILD) $(LDFLAGS) -o $(BINARY_NAME) ./cmd/main/main.go
 
 debug:
-	$(GOBUILD) $(DEBUG_LDFLAGS) -gcflags "all=-N -l" -o $(BINARY_NAME) ./cmd/main/main.go
+	$(GOBUILD) $(DEBUG_FLAGS) -o $(BINARY_NAME) ./cmd/main/main.go
 
 clean:
 	$(GOCLEAN)
@@ -48,21 +48,28 @@ lint:
 	$(GOCMD) vet ./...
 
 # Run the program
-.PHONY: run test-run debug-run profile-run
+.PHONY: run test-run debug-run profile-run endurance-test-10t endurance-test-100t
 
 run: build
 	./$(BINARY_NAME)
 
 debug-run: debug
-	./$(BINARY_NAME) --delete-ratio=0.3 --max-size=4194304 --min-size=512 --operations=1000
+	./$(BINARY_NAME) --debug --delete-ratio=0.3 --max-size=4194304 --min-size=512 --operations=1000
 
 # Run performance test with default parameters
 test-run: build
 	./$(BINARY_NAME) --delete-ratio=0.3 --max-size=4194304 --min-size=512 --operations=1000
 
+# Run endurance tests
+endurance-test-10t: debug
+	./$(BINARY_NAME) --debug --mode=endurance --target-write=10995116277760 --max-size=4194304 --min-size=512 --cpuprofile=cpu_10t.prof --memprofile=mem_10t.prof
+
+endurance-test-100t: debug
+	./$(BINARY_NAME) --debug --mode=endurance --target-write=109951162777600 --max-size=4194304 --min-size=512 --cpuprofile=cpu_100t.prof --memprofile=mem_100t.prof
+
 # Run with profiling
 profile-run: debug
-	./$(BINARY_NAME) --delete-ratio=0.3 --max-size=4194304 --min-size=512 --operations=1000 -cpuprofile=cpu.prof -memprofile=mem.prof
+	./$(BINARY_NAME) --debug --delete-ratio=0.3 --max-size=4194304 --min-size=512 --operations=1000 -cpuprofile=cpu.prof -memprofile=mem.prof
 
 # Default target
 .DEFAULT_GOAL := build 
